@@ -35,7 +35,7 @@ df
 ```{r}
 cols_to_drop <- c("X", "Unnamed..0.1", "Unnamed..0", "row", "date", "town", "flat_type", "block", "street_name", "storey_range", "flat_model", "lease_commence_date",
                   "year", "month_num", "address", "latitude", "longitude", "mrt_stations_within_1km", "nearest_mrt_station", "pri_schs_within_1km", "hawkers_within_1km",
-                  "nearest_hawker", "month_Dec", "flat_type_1.ROOM", "flat_type_MULTI.GENERATION", "town_ANG.MO.KIO", "remaining_lease")
+                  "nearest_hawker", "month_Dec", "flat_type_1.ROOM", "flat_model_Multi.Generation", "town_ANG.MO.KIO", "remaining_lease")
 
 
 df_cleaned = df[ , !(names(df) %in% cols_to_drop)]
