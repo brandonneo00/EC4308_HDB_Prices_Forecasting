@@ -1,0 +1,25 @@
+---
+title: "EC4308"
+author: "Brandon Neo Bing Jie"
+date: "2025-04-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries used 
+
+```{r}
+
+```
+
+# Importing data
+
+```{r}
+
+df <- read.csv("path/to/your/file.csv")
+
+
+```
