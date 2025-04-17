@@ -1,0 +1,301 @@
+---
+title: "ex4308"
+author: "Chow Xin Tian, Neo Bing Jie Brandon, Wong Fang Ting"
+date: "2025-04-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+load data and packages
+```{r}
+df_cleaned <- read.csv("../data/processed_hdb_data.csv")
+
+library(dplyr)
+library(fastDummies)
+library(glmnet)
+library(Metrics)
+library(corrplot)
+
+```
+
+exploratory data analysis (js basic, i think might need add more)
+```{r}
+boxplot(df_cleaned$resale_price,
+        main = "Boxplot of Resale Price",
+        ylab = "Resale Price (SGD)",
+        col = "lightblue",
+        outline = TRUE)
+
+hist(df_cleaned$resale_price,
+     breaks = 50,
+     col = "skyblue",
+     main = "Distribution of Resale Prices",
+     xlab = "Resale Price (SGD)")
+
+```
+
+Prepare Data
+```{r}
+# ---- Prepare data ----
+set.seed(123)
+X <- model.matrix(resale_price ~ . -1, data = df_cleaned)
+Y <- df_cleaned$resale_price
+n <- nrow(X)
+train_idx <- sample(1:n, size = 0.8 * n)
+X_train <- X[train_idx, ]
+Y_train <- Y[train_idx]
+X_test <- X[-train_idx, ]
+Y_test <- Y[-train_idx]
+
+# ---- R² helper ----
+rsq <- function(actual, predicted) {
+  1 - sum((actual - predicted)^2) / sum((actual - mean(actual))^2)
+}
+```
+
+OLS Baseline
+```{r}
+# ---- OLS Baseline ----
+ols_model <- lm(resale_price ~ ., data = df_cleaned)
+ols_preds <- predict(ols_model, newdata = df_cleaned)
+ols_results <- data.frame(
+  Model = "OLS (Baseline)",
+  RMSE = round(rmse(Y, ols_preds), 5),
+  MAPE = round(mape(Y, ols_preds) * 100, 5),
+  R2 = round(rsq(Y, ols_preds), 5)
+)
+
+# ---- Init results ----
+results_oos <- ols_results  # start with OLS row
+```
+
+Lasso, Ridge, Elastic Net
+```{r}
+# ---- Lambda grid ----
+lambda_grid <- 10^seq(4, -2, length = 100)
+
+# ---- CV-based Models (LASSO, Ridge, Elastic Net α=0.5) ----
+evaluate_oos <- function(alpha_val, label) {
+  cv_model <- cv.glmnet(X_train, Y_train, alpha = alpha_val, lambda = lambda_grid)
+  best_lambda <- cv_model$lambda.min
+  preds <- predict(cv_model, newx = X_test, s = best_lambda)
+  rmse_val <- rmse(Y_test, preds)
+  mape_val <- mape(Y_test, preds) * 100
+  r2_val <- rsq(Y_test, preds)
+  return(data.frame(Model = label,
+                    RMSE = round(rmse_val, 5),
+                    MAPE = round(mape_val, 5),
+                    R2 = round(r2_val, 5)))
+}
+
+results_oos <- rbind(
+  results_oos,
+  evaluate_oos(1, "LASSO"),
+  evaluate_oos(0, "Ridge"),
+  evaluate_oos(0.5, "Elastic Net")
+)
+```
+
+Post Lasso
+```{r}
+# ---- Post-LASSO ----
+lasso_model <- glmnet(X_train, Y_train, alpha = 1, lambda = lambda_grid)
+cv_lasso <- cv.glmnet(X_train, Y_train, alpha = 1, lambda = lambda_grid)
+best_lambda_lasso <- cv_lasso$lambda.min
+chosen_coef <- predict(lasso_model, s = best_lambda_lasso, type = "coefficients")
+nonzero_names <- rownames(chosen_coef)[which(chosen_coef != 0)]
+nonzero_names <- setdiff(nonzero_names, "(Intercept)")
+nonzero_idx <- which(colnames(X_train) %in% nonzero_names)
+
+X_train_post <- X_train[, nonzero_idx]
+X_test_post <- X_test[, nonzero_idx]
+df_train_post <- data.frame(resale_price = Y_train, X_train_post)
+df_test_post <- data.frame(X_test_post)
+
+post_lasso_model <- lm(resale_price ~ ., data = df_train_post)
+preds_post_lasso <- predict(post_lasso_model, newdata = df_test_post)
+
+results_oos <- rbind(
+  results_oos,
+  data.frame(Model = "Post-LASSO",
+             RMSE = round(rmse(Y_test, preds_post_lasso), 5),
+             MAPE = round(mape(Y_test, preds_post_lasso) * 100, 5),
+             R2 = round(rsq(Y_test, preds_post_lasso), 5))
+)
+```
+
+Elastic Net (best alpha)
+```{r}
+# ---- Elastic Net with best alpha ----
+alpha_grid <- seq(0.1, 0.9, by = 0.1)
+cv_errors <- c()
+best_models <- list()
+k <- 10
+
+for (a in alpha_grid) {
+  cv_model <- cv.glmnet(X_train, Y_train, alpha = a, lambda = lambda_grid, nfolds = k)
+  cv_errors <- c(cv_errors, min(cv_model$cvm))
+  best_models[[as.character(a)]] <- cv_model
+}
+
+best_alpha <- alpha_grid[which.min(cv_errors)]
+best_elastic_model <- best_models[[as.character(best_alpha)]]
+best_lambda_elastic <- best_elastic_model$lambda.min
+preds_elastic <- predict(best_elastic_model, newx = X_test, s = best_lambda_elastic)
+
+results_oos <- rbind(
+  results_oos,
+  data.frame(Model = paste0("Elastic Net (α=", best_alpha, ")"),
+             RMSE = round(rmse(Y_test, preds_elastic), 5),
+             MAPE = round(mape(Y_test, preds_elastic) * 100, 5),
+             R2 = round(rsq(Y_test, preds_elastic), 5))
+)
+
+# ---- Final results ----
+print(results_oos)
+```
+
+-- run the models again but without outliers -- 
+remove outliers
+```{r}
+# Calculate IQR-based thresholds
+Q1 <- quantile(df_cleaned$resale_price, 0.25)
+Q3 <- quantile(df_cleaned$resale_price, 0.75)
+IQR_val <- Q3 - Q1
+
+# Define lower and upper bounds
+lower_bound <- Q1 - 1.5 * IQR_val
+upper_bound <- Q3 + 1.5 * IQR_val
+
+# Filter out the outliers
+df_no_outliers <- df_cleaned[df_cleaned$resale_price >= lower_bound & df_cleaned$resale_price <= upper_bound, ]
+
+# View number of rows removed
+cat("Removed", nrow(df_cleaned) - nrow(df_no_outliers), "rows as outliers.\n")
+
+```
+
+Prepare Data
+```{r}
+# ---- Prepare data ----
+set.seed(123)
+X <- model.matrix(resale_price ~ . -1, data = df_no_outliers)
+Y <- df_no_outliers$resale_price
+n <- nrow(X)
+train_idx <- sample(1:n, size = 0.8 * n)
+X_train <- X[train_idx, ]
+Y_train <- Y[train_idx]
+X_test <- X[-train_idx, ]
+Y_test <- Y[-train_idx]
+
+# ---- R² helper ----
+rsq <- function(actual, predicted) {
+  1 - sum((actual - predicted)^2) / sum((actual - mean(actual))^2)
+}
+```
+
+OLS Baseline
+```{r}
+# ---- OLS Baseline ----
+ols_model <- lm(resale_price ~ ., data = df_no_outliers)
+ols_preds <- predict(ols_model, newdata = df_no_outliers)
+ols_results <- data.frame(
+  Model = "OLS (Baseline)",
+  RMSE = round(rmse(Y, ols_preds), 5),
+  MAPE = round(mape(Y, ols_preds) * 100, 5),
+  R2 = round(rsq(Y, ols_preds), 5)
+)
+
+# ---- Init results ----
+results_oos <- ols_results  # start with OLS row
+```
+
+Lasso, Ridge, Elastic Net
+```{r}
+# ---- Lambda grid ----
+lambda_grid <- 10^seq(4, -2, length = 100)
+
+# ---- CV-based Models (LASSO, Ridge, Elastic Net α=0.5) ----
+evaluate_oos <- function(alpha_val, label) {
+  cv_model <- cv.glmnet(X_train, Y_train, alpha = alpha_val, lambda = lambda_grid)
+  best_lambda <- cv_model$lambda.min
+  preds <- predict(cv_model, newx = X_test, s = best_lambda)
+  rmse_val <- rmse(Y_test, preds)
+  mape_val <- mape(Y_test, preds) * 100
+  r2_val <- rsq(Y_test, preds)
+  return(data.frame(Model = label,
+                    RMSE = round(rmse_val, 5),
+                    MAPE = round(mape_val, 5),
+                    R2 = round(r2_val, 5)))
+}
+
+results_oos <- rbind(
+  results_oos,
+  evaluate_oos(1, "LASSO"),
+  evaluate_oos(0, "Ridge"),
+  evaluate_oos(0.5, "Elastic Net")
+)
+```
+
+Post Lasso
+```{r}
+# ---- Post-LASSO ----
+lasso_model <- glmnet(X_train, Y_train, alpha = 1, lambda = lambda_grid)
+cv_lasso <- cv.glmnet(X_train, Y_train, alpha = 1, lambda = lambda_grid)
+best_lambda_lasso <- cv_lasso$lambda.min
+chosen_coef <- predict(lasso_model, s = best_lambda_lasso, type = "coefficients")
+nonzero_names <- rownames(chosen_coef)[which(chosen_coef != 0)]
+nonzero_names <- setdiff(nonzero_names, "(Intercept)")
+nonzero_idx <- which(colnames(X_train) %in% nonzero_names)
+
+X_train_post <- X_train[, nonzero_idx]
+X_test_post <- X_test[, nonzero_idx]
+df_train_post <- data.frame(resale_price = Y_train, X_train_post)
+df_test_post <- data.frame(X_test_post)
+
+post_lasso_model <- lm(resale_price ~ ., data = df_train_post)
+preds_post_lasso <- predict(post_lasso_model, newdata = df_test_post)
+
+results_oos <- rbind(
+  results_oos,
+  data.frame(Model = "Post-LASSO",
+             RMSE = round(rmse(Y_test, preds_post_lasso), 5),
+             MAPE = round(mape(Y_test, preds_post_lasso) * 100, 5),
+             R2 = round(rsq(Y_test, preds_post_lasso), 5))
+)
+```
+
+Elastic Net (best alpha)
+```{r}
+# ---- Elastic Net with best alpha ----
+alpha_grid <- seq(0.1, 0.9, by = 0.1)
+cv_errors <- c()
+best_models <- list()
+k <- 10
+
+for (a in alpha_grid) {
+  cv_model <- cv.glmnet(X_train, Y_train, alpha = a, lambda = lambda_grid, nfolds = k)
+  cv_errors <- c(cv_errors, min(cv_model$cvm))
+  best_models[[as.character(a)]] <- cv_model
+}
+
+best_alpha <- alpha_grid[which.min(cv_errors)]
+best_elastic_model <- best_models[[as.character(best_alpha)]]
+best_lambda_elastic <- best_elastic_model$lambda.min
+preds_elastic <- predict(best_elastic_model, newx = X_test, s = best_lambda_elastic)
+
+results_oos <- rbind(
+  results_oos,
+  data.frame(Model = paste0("Elastic Net (α=", best_alpha, ")"),
+             RMSE = round(rmse(Y_test, preds_elastic), 5),
+             MAPE = round(mape(Y_test, preds_elastic) * 100, 5),
+             R2 = round(rsq(Y_test, preds_elastic), 5))
+)
+
+# ---- Final results ----
+print(results_oos)
+```
+
