@@ -1,0 +1,139 @@
+---
+title: "Ensemble_Trees"
+author: "Brandon Neo Bing Jie"
+date: "2025-04-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# venv cuz my R got problem, yall can ignore this
+# renv::init()
+
+```
+
+
+```{r}
+# library(gbm) #for boosted regression trees
+library(randomForest) # for random forest
+
+```
+
+```{r}
+df_cleaned <- read.csv("../data/processed_hdb_data.csv")
+
+```
+
+# Prepare Data
+
+```{r}
+
+# ---- Prepare data ----
+set.seed(123)
+X <- model.matrix(resale_price ~ . -1, data = df_cleaned)
+Y <- df_cleaned$resale_price
+n <- nrow(X)
+train_idx <- sample(1:n, size = 0.8 * n)
+# train_idx <- sample(1:n, size = 0.001 * n) #just testing out on a small sample just now
+X_train <- X[train_idx, ]
+Y_train <- Y[train_idx]
+X_test <- X[-train_idx, ]
+Y_test <- Y[-train_idx]
+
+# ---- R² helper ----
+rsq <- function(actual, predicted) {
+  1 - sum((actual - predicted)^2) / sum((actual - mean(actual))^2)
+}
+```
+
+# Normalise the numerical features
+
+```{r}
+
+colnames(X_train)
+
+# might be incomplete - but not needed for RF, needed for the other linear models for scaling
+numerical_features = c("floor_area_sqm", "count_mrt_stations_within_1km", "distance_to_cbd", "count_pri_schs_within_1km",
+                       "count_hawkers_within_1km", "remaining_lease_months", "level")
+```
+
+
+
+```{r}
+library(caret)
+library(randomForest)
+
+set.seed(123)
+
+# 1. Prepare training data
+train_df <- data.frame(resale_price = Y_train, X_train)
+
+# 2. Define CV strategy
+ctrl <- trainControl(
+  method = "cv",
+  number = 5,
+  search = "grid"
+)
+
+# 3. Custom model: tune only maxnodes, fix mtry
+customRF <- list(
+  type = "Regression",
+  library = "randomForest",
+  loop = NULL,
+  parameters = data.frame(
+    parameter = "maxnodes",
+    class = "numeric",
+    label = "maxnodes"
+  ),
+  grid = function(x, y, len = NULL, search = "grid") {
+    data.frame(maxnodes = seq(5, 30, by = 5))  # adjust as needed
+  },
+  fit = function(x, y, wts, param, lev, last, classProbs, ...) {
+    # fix mtry here (e.g., use sqrt(p))
+    randomForest(
+      x, y,
+      mtry = floor(sqrt(ncol(x))),  # fixed
+      maxnodes = param$maxnodes,
+      ...
+    )
+  },
+  predict = function(modelFit, newdata, submodels = NULL) {
+    predict(modelFit, newdata)
+  },
+  prob = NULL
+)
+
+# 4. Train model with grid search on maxnodes
+rf_tuned <- train(
+  resale_price ~ .,
+  data = train_df,
+  method = customRF,
+  metric = "RMSE",
+  tuneGrid = data.frame(maxnodes = seq(5, 30, by = 5)),  # tune this only
+  trControl = ctrl,
+  ntree = 500  # or more
+)
+
+# 5. Results
+print(rf_tuned)
+plot(rf_tuned)
+
+# 6. Refit with best maxnodes on full training data
+best_maxnodes <- rf_tuned$bestTune$maxnodes
+rf_final <- randomForest(
+  x = X_train,
+  y = Y_train,
+  mtry = floor(sqrt(ncol(X_train))),
+  maxnodes = best_maxnodes,
+  ntree = 1000
+)
+
+# 7. Predict and evaluate on test set
+preds <- predict(rf_final, X_test)
+rsq(Y_test, preds)
+
+
+```
