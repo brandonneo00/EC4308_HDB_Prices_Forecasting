@@ -1,0 +1,45 @@
+---
+title: "ex4308"
+author: "Chow Xin Tian, Neo Bing Jie Brandon, Wong Fang Ting"
+date: "2025-04-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Ensemble Stacking
+
+```{r}
+
+ols_oos_new = read.csv("ols_preds.csv") 
+rf_oos_new = read.csv("random_forest_oos_predictions.csv")
+ridge_oos_new = read.csv("ridge_preds.csv")
+
+## actuals col for ridge
+ridge_oos_new_no_actual = ridge_oos_new[,2]
+
+## creating the stacked df
+stacked_df <- data.frame(
+  OLS_Pred = ols_oos_new,
+  Ridge_Pred = ridge_oos_new_no_actual,
+  RF_Pred = rf_oos_new
+)
+
+## creating the average pred col 
+stacked_df$Avg_Pred <- rowMeans(stacked_df[, 2:4])
+stacked_df
+
+## evaluation for stack ensemble
+stacked_results_oos = data.frame(
+  Model = "Stacked Ensemble (Equal Weight)",
+  RMSE  = round(rmse(Y_test, stacked_df$Avg_Pred), 5),
+  MAE   = round(mae(Y_test, stacked_df$Avg_Pred), 5),
+  MAPE  = round(mape(Y_test, stacked_df$Avg_Pred) * 100, 5),
+  R2    = round(rsq(Y_test, stacked_df$Avg_Pred), 5)
+)
+
+print(stacked_results_oos)
+
+```
