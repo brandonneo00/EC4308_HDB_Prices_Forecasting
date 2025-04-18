@@ -209,3 +209,83 @@ print(results_oos)
 
 ```
 
+
+```{r}
+# --- OLS Coefficients ---
+ols_model <- lm(resale_price ~ ., data = df_train_scaled)  # scaled # Ensure OLS and Ridge coefficients have matching names
+ols_coefs <- coef(ols_model)
+ols_coefs <- ols_coefs[names(ols_coefs) != "(Intercept)"]
+
+ridge_model <- glmnet(X_train_scaled, Y_train, alpha = 0, lambda = lambda_grid)
+cv_ridge <- cv.glmnet(X_train_scaled, Y_train, alpha = 0, lambda = lambda_grid)
+best_lambda_ridge <- cv_ridge$lambda.min
+ridge_coefs <- predict(ridge_model, s = best_lambda_ridge, type = "coefficients")
+ridge_coefs <- as.vector(ridge_coefs)
+names(ridge_coefs) <- rownames(predict(ridge_model, s = best_lambda_ridge, type = "coefficients"))
+ridge_coefs <- ridge_coefs[names(ridge_coefs) != "(Intercept)"]
+
+# Match common feature names
+common_names <- intersect(names(ols_coefs), names(ridge_coefs))
+
+# Compute absolute difference
+coef_diff <- abs(ols_coefs[common_names] - ridge_coefs[common_names])
+
+# Create sorted dataframe from largest to smallest difference
+coef_comparison <- data.frame(
+  Feature = common_names,
+  OLS_Coefficient = round(ols_coefs[common_names], 5),
+  Ridge_Coefficient = round(ridge_coefs[common_names], 5),
+  Absolute_Difference = round(coef_diff, 5)
+)
+
+coef_comparison <- coef_comparison[complete.cases(coef_comparison), ]
+
+
+coef_comparison_sorted <- coef_comparison[order(-coef_comparison$Absolute_Difference), ]
+
+# Top 10 most different
+top10_most_diff <- head(coef_comparison_sorted, 10)
+cat("Top 10 Most Different Features:\n")
+print(top10_most_diff)
+
+# Top 10 least different
+top10_least_diff <- tail(coef_comparison_sorted, 10)
+cat("\nTop 10 Least Different Features:\n")
+print(top10_least_diff)
+```
+
+```{r}
+
+# === OLS FEATURE IMPORTANCE ===
+ols_coefs <- coef(ols_model)
+ols_coefs <- ols_coefs[names(ols_coefs) != "(Intercept)"]  # remove intercept
+ols_importance <- data.frame(
+  Feature = names(ols_coefs),
+  Coefficient = round(ols_coefs, 5),
+  Abs_Coefficient = round(abs(ols_coefs), 5)
+)
+# Top 10 by absolute value
+top10_ols_importance <- ols_importance[order(-ols_importance$Abs_Coefficient), ][1:10, ]
+cat("🔹 Top 10 Most Important OLS Features:\n")
+print(top10_ols_importance)
+
+# === RIDGE FEATURE IMPORTANCE ===
+ridge_model <- glmnet(X_train_scaled, Y_train, alpha = 0, lambda = lambda_grid)
+cv_ridge <- cv.glmnet(X_train_scaled, Y_train, alpha = 0, lambda = lambda_grid)
+best_lambda_ridge <- cv_ridge$lambda.min
+ridge_coefs <- predict(ridge_model, s = best_lambda_ridge, type = "coefficients")
+ridge_coefs <- as.vector(ridge_coefs)
+names(ridge_coefs) <- rownames(predict(ridge_model, s = best_lambda_ridge, type = "coefficients"))
+ridge_coefs <- ridge_coefs[names(ridge_coefs) != "(Intercept)"]
+ridge_importance <- data.frame(
+  Feature = names(ridge_coefs),
+  Coefficient = round(ridge_coefs, 5),
+  Abs_Coefficient = round(abs(ridge_coefs), 5)
+)
+# Top 10 by absolute value
+top10_ridge_importance <- ridge_importance[order(-ridge_importance$Abs_Coefficient), ][1:10, ]
+cat("\n🔹 Top 10 Most Important Ridge Features:\n")
+print(top10_ridge_importance)
+
+
+```
