@@ -39,16 +39,15 @@ Y_train <- Y[train_idx]
 X_test  <- X[-train_idx, ]
 Y_test  <- Y[-train_idx]
 
-# 3. Identify numeric columns to scale (glmnet works on matrices, so all should be numeric)
-# So we scale all columns in X_train and X_test
-x_means <- apply(X_train, 2, mean)
-x_sds   <- apply(X_train, 2, sd)
+# 3. Compute min and max for each feature in training set
+x_mins <- apply(X_train, 2, min)
+x_maxs <- apply(X_train, 2, max)
 
-# 4. Scale training data
-X_train_scaled <- scale(X_train, center = x_means, scale = x_sds)
+# 4. Scale training data to [0,1]
+X_train_scaled <- scale(X_train, center = x_mins, scale = x_maxs - x_mins)
 
-# 5. Scale test data using training mean and sd
-X_test_scaled <- scale(X_test, center = x_means, scale = x_sds)
+# 5. Scale test data using training min and max
+X_test_scaled <- scale(X_test, center = x_mins, scale = x_maxs - x_mins)
 
 # 6. R² helper
 rsq <- function(actual, predicted) {
@@ -82,7 +81,7 @@ results_oos <- data.frame(
 )
 
 # View results
-print(ols_results)
+print(results_oos)
 
 ```
 
